@@ -618,13 +618,6 @@ def main():
     Main function to run the Streamlit application.
     It handles the overall layout and flow.
     """
-    st.set_page_config(
-        page_title="TrendPredict AI",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
     if 'data_source_success' not in st.session_state:
         st.session_state.data_source_success = None
     
@@ -684,3 +677,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
