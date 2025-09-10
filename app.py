@@ -442,16 +442,28 @@ def get_stock_info(ticker):
     
     info['market_cap'] = 'N/A'
     return info
-
+    
 def display_welcome_page():
     """Displays the welcome page with an overview of the app's features."""
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.image("https://placehold.co/1200x300/F0F2F6/007BFF?text=TrendPredict+AI", width='stretch')
+
+    # Hero banner image
+    st.image(
+        "https://placehold.co/1200x300/F0F2F6/007BFF?text=TrendPredict+AI",
+        use_container_width=True
+    )
+
+    # Welcome text
     st.markdown("""
+    ### 👋 Welcome to **TrendPredict AI**
+
     Welcome to TrendPredict AI, an advanced financial analysis tool designed to demonstrate the power of machine learning in market prediction. 
     Harness the power of our AI to analyze market patterns, predict price movements, and gain unprecedented insights into financial markets.
     """)
-    st.markdown("---")
+
+    st.markdown("---", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
 
     st.subheader("Core Features")
     col1, col2, col3 = st.columns(3)
@@ -697,5 +709,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
