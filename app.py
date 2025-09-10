@@ -227,7 +227,6 @@ def fetch_stock_data_unified(ticker, period="1y"):
     """
     Fetches stock data with a fallback mechanism: yfinance -> Alpha Vantage -> Sample Data.
     """
-    # 1. Try fetching from yfinance first
     if YFINANCE_AVAILABLE:
         try:
             stock = yf.Ticker(ticker)
@@ -246,8 +245,7 @@ def fetch_stock_data_unified(ticker, period="1y"):
                 return df
         except Exception as e:
             st.warning(f"yfinance fetch failed: {e}. Trying Alpha Vantage...")
-
-    # 2. Fallback to Alpha Vantage
+            
     try:
         api_ticker = ticker.replace('.NS', '') if ticker.endswith('.NS') else ticker
         params = {
@@ -621,7 +619,6 @@ def main():
     if 'data_source_success' not in st.session_state:
         st.session_state.data_source_success = None
     
-    # Initialize session state variables if they don't exist
     if 'ticker' not in st.session_state:
         st.session_state.ticker = "SPY"
     if 'period' not in st.session_state:
@@ -629,7 +626,6 @@ def main():
     if 'analyze_button_clicked' not in st.session_state:
         st.session_state.analyze_button_clicked = False
     
-    # Callback function to handle button click
     def set_analyze_button_clicked():
         st.session_state.analyze_button_clicked = True
     
@@ -644,12 +640,35 @@ def main():
         market_category = st.selectbox("Market Sector", market_categories, key='market_category')
 
         if market_category == "⚙️ Custom Ticker":
-            st.text_input("Enter Custom Ticker", value=st.session_state.ticker, placeholder="e.g., AAPL, RELIANCE.NS", key='ticker')
+            st.text_input(
+                "Enter Custom Ticker",
+                value=st.session_state.ticker,
+                placeholder="e.g., AAPL, RELIANCE.NS",
+                key='ticker'
+            )
         else:
             stock_options = MARKET_STOCKS[market_category]
-            st.selectbox("Select Stock", list(stock_options.keys()), format_func=lambda x: f"{x} - {stock_options[x]}", key='ticker')
-        
-        st.select_slider("Analysis Period", options=["3mo", "6mo", "1y", "2y", "5y"], value=st.session_state.period, key='period')
+            options = list(stock_options.keys())
+            
+            default_ticker = st.session_state.ticker
+            if default_ticker not in options:
+                default_ticker = options[0]  # fallback to first option
+                st.session_state.ticker = default_ticker
+
+            st.selectbox(
+                "Select Stock",
+                options,
+                index=options.index(default_ticker),
+                format_func=lambda x: f"{x} - {stock_options[x]}",
+                key='ticker'
+            )
+
+        st.select_slider(
+            "Analysis Period",
+            options=["3mo", "6mo", "1y", "2y", "5y"],
+            value=st.session_state.period,
+            key='period'
+        )
         
         st.markdown("---")
         st.button("🚀 Run Analysis", use_container_width=True, on_click=set_analyze_button_clicked)
@@ -675,6 +694,8 @@ def main():
     else:
         display_welcome_page()
 
+
 if __name__ == "__main__":
     main()
+
 
