@@ -1,0 +1,1 @@
+# TrendPredict-AI
