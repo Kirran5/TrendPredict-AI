@@ -13,20 +13,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import warnings
 warnings.filterwarnings('ignore')
 
-
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-    st.warning("⚠️ yfinance not installed. Only Alpha Vantage will be used.")
-
-try:
-    ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
-except:
-    ALPHA_VANTAGE_API_KEY = "L03O604P4FDTZUWQ"  # Demo key with limited rate
-AV_BASE_URL = 'https://www.alphavantage.co/query' 
-
+# IMPORTANT: set_page_config must be the FIRST Streamlit command in the script
 st.set_page_config(
     page_title="TrendPredict AI",
     page_icon="📈",
@@ -34,6 +21,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# External libraries
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except Exception:
+    YFINANCE_AVAILABLE = False
+
+# Alpha Vantage API key (set in Streamlit secrets for deployment)
+try:
+    ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
+except Exception:
+    ALPHA_VANTAGE_API_KEY = "L03O604P4FDTZUWQ"  # Demo key with limited rate
+AV_BASE_URL = 'https://www.alphavantage.co/query'
+
+# Styling
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -178,6 +180,7 @@ MARKET_STOCKS = {
     }
 }
 
+
 def test_api_connections():
     status = {
         'yfinance': {'available': YFINANCE_AVAILABLE, 'working': False, 'message': ""},
@@ -194,7 +197,7 @@ def test_api_connections():
             else:
                 status['yfinance']['message'] = "❌ yfinance returned no data"
         except Exception as e:
-            status['yfinance']['message'] = f"❌ yfinance error: {str(e)[:50]}..."
+            status['yfinance']['message'] = f"❌ yfinance error: {str(e)[:200]}"
     else:
         status['yfinance']['message'] = "❌ yfinance not installed"
     
@@ -218,7 +221,7 @@ def test_api_connections():
         else:
             status['alpha_vantage']['message'] = "❌ Unknown Alpha Vantage response"
     except Exception as e:
-        status['alpha_vantage']['message'] = f"❌ Alpha Vantage connection failed: {str(e)[:50]}..."
+        status['alpha_vantage']['message'] = f"❌ Alpha Vantage connection failed: {str(e)[:200]}"
     
     return status
 
@@ -227,6 +230,7 @@ def fetch_stock_data_unified(ticker, period="1y"):
     """
     Fetches stock data with a fallback mechanism: yfinance -> Alpha Vantage -> Sample Data.
     """
+    # Try yfinance first (if available)
     if YFINANCE_AVAILABLE:
         try:
             stock = yf.Ticker(ticker)
@@ -238,14 +242,17 @@ def fetch_stock_data_unified(ticker, period="1y"):
                 df = df.reset_index()
                 if 'Datetime' in df.columns:
                     df.rename(columns={'Datetime': 'Date'}, inplace=True)
+                if 'Date' not in df.columns and df.index.name is not None:
+                    df = df.reset_index()
                 df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
                 df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
                 df.attrs['source'] = 'yfinance'
-                st.session_state.data_source_success = "Fetched data from yfinance."
                 return df
-        except Exception as e:
-            st.warning(f"yfinance fetch failed: {e}. Trying Alpha Vantage...")
-            
+        except Exception:
+            # let fallback continue
+            pass
+    
+    # Alpha Vantage fallback
     try:
         api_ticker = ticker.replace('.NS', '') if ticker.endswith('.NS') else ticker
         params = {
@@ -275,11 +282,10 @@ def fetch_stock_data_unified(ticker, period="1y"):
         df = df[df['Date'] >= start_date]
         
         df.attrs['source'] = 'alpha_vantage'
-        st.session_state.data_source_success = "Fetched data from Alpha Vantage."
         return df
         
-    except Exception as e:
-        st.warning(f"Alpha Vantage fetch failed: {e}. Using generated sample data.")
+    except Exception:
+        # Final fallback: generated sample data
         return create_sample_data(ticker, period)
 
 
@@ -289,6 +295,7 @@ def get_period_days(period):
         '1y': 365, '2y': 730, '5y': 1825
     }
     return period_map.get(period, 365)
+
 
 def create_sample_data(ticker, period):
     days = get_period_days(period)
@@ -302,7 +309,7 @@ def create_sample_data(ticker, period):
     base_name = ticker.split('.')[0].upper()
     base_price = base_prices.get(base_name, 1000)
     
-    np.random.seed(hash(ticker) % 2**32)
+    np.random.seed(abs(hash(ticker)) % 2**32)
     dates = pd.date_range(end=datetime.now(), periods=days, freq='B')
     
     daily_return = 0.08 / 252
@@ -349,6 +356,7 @@ def create_sample_data(ticker, period):
     df.attrs = {'source': 'sample_data', 'ticker': ticker}
     return df
 
+
 def calculate_rsi(prices, window=14):
     delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -357,8 +365,10 @@ def calculate_rsi(prices, window=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+
 def process_stock_data(df, ticker, source):
-    if df is None or df.empty: return None
+    if df is None or df.empty:
+        return None
     df = df.set_index('Date').sort_index().reset_index()
     
     df['MA_20'] = df['Close'].rolling(window=20).mean()
@@ -368,8 +378,11 @@ def process_stock_data(df, ticker, source):
         df[f'Close_Lag_{i}'] = df['Close'].shift(i)
     
     df = df.dropna()
+    if df.empty:
+        return None
     df.attrs = {'source': source, 'ticker': ticker}
     return df
+
 
 def prepare_features(df):
     feature_columns = ['Open', 'High', 'Low', 'Volume', 'MA_20', 'MA_50', 'RSI']
@@ -378,6 +391,7 @@ def prepare_features(df):
     X = df[feature_columns].copy()
     y = df['Close'].copy()
     return X, y, feature_columns
+
 
 def train_model(df):
     try:
@@ -407,14 +421,16 @@ def train_model(df):
         st.error(f"Model training error: {str(e)}")
         return None, None, None, None
 
+
 def predict_next_price(model, scaler, df):
     try:
         X, _, _ = prepare_features(df)
         if X.empty: return None
         last_features_scaled = scaler.transform(X.iloc[-1:])
-        return model.predict(last_features_scaled)[0]
-    except:
+        return float(model.predict(last_features_scaled)[0])
+    except Exception:
         return None
+
 
 def get_stock_info(ticker):
     stock_info = {
@@ -442,12 +458,13 @@ def get_stock_info(ticker):
     
     info['market_cap'] = 'N/A'
     return info
-    
+
+
 def display_welcome_page():
     """Displays the welcome page with an overview of the app's features."""
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    # Hero banner image
+    # Hero banner image (use_container_width is the modern parameter)
     st.image(
         "https://placehold.co/1200x300/F0F2F6/007BFF?text=TrendPredict+AI",
         use_container_width=True
@@ -457,13 +474,16 @@ def display_welcome_page():
     st.markdown("""
     ### 👋 Welcome to **TrendPredict AI**
 
-    Welcome to TrendPredict AI, an advanced financial analysis tool designed to demonstrate the power of machine learning in market prediction. 
-    Harness the power of our AI to analyze market patterns, predict price movements, and gain unprecedented insights into financial markets.
+    An advanced financial analysis tool powered by machine learning.  
+    Use this app to analyze **market patterns**, predict **price movements**, and gain **deeper insights** into global financial markets.
     """)
 
     st.markdown("---", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    
+
+    # Show a small note if yfinance isn't available locally
+    if not YFINANCE_AVAILABLE:
+        st.warning("⚠️ `yfinance` is not installed in this environment. The app will attempt Alpha Vantage or use sample data.")
 
     st.subheader("Core Features")
     col1, col2, col3 = st.columns(3)
@@ -474,7 +494,7 @@ def display_welcome_page():
     with col3:
         st.markdown('<div class="metric-card"><h3>📊 Premium Analytics</h3><p>Interactive visualizations, technical indicators, and in-depth model performance analysis.</p></div>', unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<br>', unsafe_allow_html=True)
     st.markdown('<div class="card" style="padding-top: 0.5rem">', unsafe_allow_html=True)
     st.subheader("🎯 Platform Capabilities")
     c1, c2 = st.columns(2)
@@ -497,7 +517,7 @@ def display_welcome_page():
         """)
     st.markdown("</div>", unsafe_allow_html=True)
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<br>', unsafe_allow_html=True)
     st.markdown('<div class="card" style="padding-top: 0.5rem">', unsafe_allow_html=True)
     st.subheader("🚀 Quick Start Guide")
     st.markdown("""
@@ -514,6 +534,7 @@ def display_welcome_page():
     <strong>Disclaimer:</strong> This tool is for educational and informational purposes only and does not constitute financial advice. All predictions are based on historical data and do not guarantee future results.
     </div>""", unsafe_allow_html=True)
 
+
 def display_analysis_dashboard():
     """Displays the main analysis dashboard."""
     ticker = st.session_state.ticker
@@ -521,126 +542,130 @@ def display_analysis_dashboard():
 
     with st.spinner(f"Initiating analysis for {ticker}..."):
         df_raw = fetch_stock_data_unified(ticker, period=period)
-    
+
     if df_raw is None or df_raw.empty:
         st.error("Data acquisition failed from all sources. Please verify the ticker or try again.")
+        return
     else:
-        if st.session_state.data_source_success:
-            st.success(st.session_state.data_source_success)
-            st.session_state.data_source_success = None # Reset after showing
-            
         source = df_raw.attrs.get('source', 'unknown')
-        st.info(f"Displaying analysis using data from **{source.replace('_', ' ').title()}**.")
+        st.success(f"Fetched data from {source.replace('_', ' ').title()}.")
         with st.spinner("Processing temporal data and training AI core..."):
             df = process_stock_data(df_raw, ticker, source)
         
         if df is None or df.empty:
             st.error("Data processing anomaly. Insufficient data for AI training after feature engineering.")
-        else:
-            stock_info = get_stock_info(ticker)
-            st.title(f"📈 {stock_info['name']} ({ticker}) Intelligence Dashboard")
+            return
 
-            tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🧠 AI Prediction", "📊 Technical Charts", "⚙️ Model DNA"])
+        stock_info = get_stock_info(ticker)
+        st.title(f"📈 {stock_info['name']} ({ticker}) Intelligence Dashboard")
 
-            with tab1:
-                st.header("Market Snapshot")
-                current_price = df['Close'].iloc[-1]
-                prev_price = df['Close'].iloc[-2]
-                price_change = current_price - prev_price
-                pct_change = (price_change / prev_price) * 100
-                currency_symbol = '₹' if stock_info['currency'] == 'INR' else '$'
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🧠 AI Prediction", "📊 Technical Charts", "⚙️ Model DNA"])
 
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    st.markdown(f'<div class="metric-card"><h3>Last Close</h3><p>{currency_symbol}{current_price:.2f}</p><span class="{"positive" if price_change >= 0 else "negative"}">{price_change:+.2f} ({pct_change:.2f}%)</span></div>', unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f'<div class="metric-card"><h3>Day Range</h3><p>{currency_symbol}{df["Low"].iloc[-1]:.2f} - {currency_symbol}{df["High"].iloc[-1]:.2f}</p><span>Today\'s High-Low</span></div>', unsafe_allow_html=True)
-                with c3:
-                    st.markdown(f'<div class="metric-card"><h3>Volume</h3><p>{df["Volume"].iloc[-1]/1e6:.2f}M</p><span>Shares Traded</span></div>', unsafe_allow_html=True)
-                with c4:
-                    st.markdown(f'<div class="metric-card"><h3>52-Wk High</h3><p>{currency_symbol}{df["High"].max():.2f}</p><span>Annual Peak</span></div>', unsafe_allow_html=True)
+        with tab1:
+            st.header("Market Snapshot")
+            current_price = float(df['Close'].iloc[-1])
+            prev_price = float(df['Close'].iloc[-2]) if len(df) >= 2 else current_price
+            price_change = current_price - prev_price
+            pct_change = (price_change / prev_price) * 100 if prev_price != 0 else 0
+            currency_symbol = '₹' if stock_info['currency'] == 'INR' else '$'
 
-                fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price')])
-                fig.add_trace(go.Scatter(x=df['Date'], y=df['MA_20'], mode='lines', name='20-Day MA', line=dict(color='#FFA500', width=2)))
-                fig.add_trace(go.Scatter(x=df['Date'], y=df['MA_50'], mode='lines', name='50-Day MA', line=dict(color='#8A2BE2', width=2)))
-                fig.update_layout(title='Price Action with Moving Averages', template='plotly_white', xaxis_rangeslider_visible=False, height=500)
-                st.plotly_chart(fig, width='stretch', key="main_chart")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                cls = 'positive' if price_change >= 0 else 'negative'
+                st.markdown(f"<div class=\"metric-card\"><h3>Last Close</h3><p>{currency_symbol}{current_price:.2f}</p><span class=\"{cls}\">{price_change:+.2f} ({pct_change:.2f}%)</span></div>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<div class=\"metric-card\"><h3>Day Range</h3><p>{currency_symbol}{df['Low'].iloc[-1]:.2f} - {currency_symbol}{df['High'].iloc[-1]:.2f}</p><span>Today's High-Low</span></div>", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"<div class=\"metric-card\"><h3>Volume</h3><p>{df['Volume'].iloc[-1]/1e6:.2f}M</p><span>Shares Traded</span></div>", unsafe_allow_html=True)
+            with c4:
+                st.markdown(f"<div class=\"metric-card\"><h3>52-Wk High</h3><p>{currency_symbol}{df['High'].max():.2f}</p><span>Annual Peak</span></div>", unsafe_allow_html=True)
 
-            with tab2:
-                st.header("AI Prediction Engine")
-                with st.spinner("Calibrating predictive model..."):
-                    model, scaler, metrics, feature_importance = train_model(df)
+            fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price')])
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['MA_20'], mode='lines', name='20-Day MA', line=dict(width=2)))
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['MA_50'], mode='lines', name='50-Day MA', line=dict(width=2)))
+            fig.update_layout(title='Price Action with Moving Averages', template='plotly_white', xaxis_rangeslider_visible=False, height=500)
+            st.plotly_chart(fig, use_container_width=True, key="main_chart")
 
-                if model and 'current_price' in locals():
-                    prediction = predict_next_price(model, scaler, df)
+        with tab2:
+            st.header("AI Prediction Engine")
+            with st.spinner("Calibrating predictive model..."):
+                model, scaler, metrics, feature_importance = train_model(df)
+
+            if model is not None:
+                prediction = predict_next_price(model, scaler, df)
+                if prediction is not None:
                     st.markdown('<div class="card">', unsafe_allow_html=True)
                     pred_cols = st.columns((2, 2, 3))
                     with pred_cols[0]:
                         st.metric("Last Closing Price", f"{currency_symbol}{current_price:.2f}")
                     with pred_cols[1]:
                         st.metric("AI Predicted Next Close", f"{currency_symbol}{prediction:.2f}")
-                    
+
                     pred_change = prediction - current_price
-                    pred_pct = (pred_change / current_price) * 100
+                    pred_pct = (pred_change / current_price) * 100 if current_price != 0 else 0
                     with pred_cols[2]:
                         st.metric("Anticipated Movement", f"{pred_pct:.2f}%", f"{pred_change:+.2f} {stock_info['currency']}")
                     st.markdown("</div>", unsafe_allow_html=True)
                 else:
-                    st.error("AI Core calibration failed. Unable to generate prediction.")
+                    st.error("AI Core generated no prediction.")
+            else:
+                st.error("AI Core calibration failed. Unable to generate prediction.")
 
-            with tab3:
-                st.header("Advanced Technical Charts")
-                c1, c2 = st.columns(2)
-                with c1:
-                    fig_vol = px.bar(df, x='Date', y='Volume', title='Trading Volume Analysis')
-                    fig_vol.update_layout(template='plotly_white')
-                    st.plotly_chart(fig_vol, width='stretch', key="volume_chart")
-                with c2:
-                    fig_rsi = go.Figure()
-                    fig_rsi.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', line=dict(color='#00C6FF')))
-                    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
-                    fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
-                    fig_rsi.update_layout(title='Relative Strength Index (RSI)', template='plotly_white', yaxis_range=[0,100])
-                    st.plotly_chart(fig_rsi, width='stretch', key="rsi_chart")
+        with tab3:
+            st.header("Advanced Technical Charts")
+            c1, c2 = st.columns(2)
+            with c1:
+                fig_vol = px.bar(df, x='Date', y='Volume', title='Trading Volume Analysis')
+                fig_vol.update_layout(template='plotly_white')
+                st.plotly_chart(fig_vol, use_container_width=True, key="volume_chart")
+            with c2:
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI'))
+                fig_rsi.add_hline(y=70, line_dash="dash", annotation_text="Overbought")
+                fig_rsi.add_hline(y=30, line_dash="dash", annotation_text="Oversold")
+                fig_rsi.update_layout(title='Relative Strength Index (RSI)', template='plotly_white', yaxis_range=[0,100])
+                st.plotly_chart(fig_rsi, use_container_width=True, key="rsi_chart")
 
-            with tab4:
-                st.header("Model DNA: Deconstructing the AI")
-                if 'metrics' in locals() and metrics:
-                    st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.subheader("Model Performance Evaluation")
-                    perf_cols = st.columns(2)
-                    perf_cols[0].metric("Predictive Accuracy (R² Score)", f"{metrics['test_r2']:.2%}")
-                    perf_cols[1].metric("Avg. Prediction Error (MAE)", f"{currency_symbol}{metrics['test_mae']:.2f}")
-                    st.info(f"The model's predictions on unseen test data were, on average, off by {currency_symbol}{metrics['test_mae']:.2f}. The R² score indicates how much of the price variation the model could explain.")
-                    st.markdown("</div>", unsafe_allow_html=True)
+        with tab4:
+            st.header("Model DNA: Deconstructing the AI")
+            if metrics:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.subheader("Model Performance Evaluation")
+                perf_cols = st.columns(2)
+                perf_cols[0].metric("Predictive Accuracy (R² Score)", f"{metrics['test_r2']:.2%}")
+                perf_cols[1].metric("Avg. Prediction Error (MAE)", f"{currency_symbol}{metrics['test_mae']:.2f}")
+                st.info(f"The model's predictions on unseen test data were, on average, off by {currency_symbol}{metrics['test_mae']:.2f}. The R² score indicates how much of the price variation the model could explain.")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                if 'feature_importance' in locals() and feature_importance is not None:
-                    st.markdown('<div class="card" style="margin-top: 2rem;">', unsafe_allow_html=True)
-                    st.subheader("Feature Influence Matrix")
-                    st.write("This chart shows which data points the AI considered most important when making its predictions. Higher values indicate greater influence.")
-                    fig_imp = px.bar(feature_importance.head(10), x='importance', y='feature', orientation='h', title="Top 10 Most Influential Features")
-                    fig_imp.update_layout(template='plotly_white', yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_imp, width='stretch', key="feature_importance_chart")
-                    st.markdown("</div>", unsafe_allow_html=True)
+            if feature_importance is not None:
+                st.markdown('<div class="card" style="margin-top: 2rem;">', unsafe_allow_html=True)
+                st.subheader("Feature Influence Matrix")
+                st.write("This chart shows which data points the AI considered most important when making its predictions. Higher values indicate greater influence.")
+                fig_imp = px.bar(feature_importance.head(10), x='importance', y='feature', orientation='h', title="Top 10 Most Influential Features")
+                fig_imp.update_layout(template='plotly_white', yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_imp, use_container_width=True, key="feature_importance_chart")
+                st.markdown("</div>", unsafe_allow_html=True)
+
 
 def main():
     """
     Main function to run the Streamlit application.
     It handles the overall layout and flow.
     """
+    # Initialize session state variables if they don't exist
     if 'data_source_success' not in st.session_state:
         st.session_state.data_source_success = None
-    
+
     if 'ticker' not in st.session_state:
-        st.session_state.ticker = "SPY"
+        st.session_state.ticker = "AAPL"
     if 'period' not in st.session_state:
         st.session_state.period = "1y"
     if 'analyze_button_clicked' not in st.session_state:
         st.session_state.analyze_button_clicked = False
-    
+
     def set_analyze_button_clicked():
         st.session_state.analyze_button_clicked = True
-    
+
     with st.sidebar:
         st.markdown("<h3>TrendPredict AI 📈</h3>", unsafe_allow_html=True)
         st.markdown("AI-Powered Market Intelligence")
@@ -709,6 +734,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
